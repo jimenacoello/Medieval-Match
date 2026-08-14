@@ -1,6 +1,7 @@
 using UnityEngine;
-using TMPro; // <--- Importante para los InputFields de TextMeshPro
-using UnityEngine.UI;
+using TMPro;
+using UnityEngine.SceneManagement;
+using Fusion;
 
 public class MenuButtonHelper : MonoBehaviour
 {
@@ -9,7 +10,11 @@ public class MenuButtonHelper : MonoBehaviour
     [SerializeField] private GameObject panelCreateServer;
     [SerializeField] private GameObject panelJoinServer;
     [SerializeField] private GameObject panelMainMenu;
-    [SerializeField] private GameObject panelError; // El canvas/imagen de error que se activa
+    [SerializeField] private GameObject panelError;
+    [SerializeField] private GameObject panelRegisterUser;
+
+    [SerializeField] private GameObject panelLogin;
+    [SerializeField] private GameObject panelSignIn;
 
     [Header("Campos de Texto - Crear Servidor")]
     [SerializeField] private TMP_InputField inputNombreCrear;
@@ -18,31 +23,90 @@ public class MenuButtonHelper : MonoBehaviour
     [Header("Campos de Texto - Unirse a Servidor")]
     [SerializeField] private TMP_InputField inputNombreUnirse;
 
+    [Header("Campos de LogIn/SignIn a Menú Principal")]
+    [SerializeField] private GameObject panelIntro;
+    [SerializeField] private GameObject panelEncontrarPartida;
+    [SerializeField] private GameObject panelMenuSignIn;
+    [SerializeField] private GameObject panelMenuLogIn;
+
+    [Header("Escena de Hub")]
+    [SerializeField] private string nombreEscenaHub = "Hub";
+
     private PhotonManager pm;
 
     private void Start()
     {
         pm = Object.FindFirstObjectByType<PhotonManager>();
 
-        // Aseguramos que el panel de error inicie apagado
         if (panelError != null) panelError.SetActive(false);
     }
+    public void RegresarAlHubMenu()
+    {
+        NetworkRunner runner = Object.FindFirstObjectByType<NetworkRunner>();
+        if (runner != null)
+        {
+            runner.Shutdown();
+        }
 
-    // ==========================================
-    // VALIDACIÓN Y ACCIONES DE BOTONES
-    // ==========================================
+        Time.timeScale = 1f;
+        SceneManager.LoadScene(nombreEscenaHub);
+    }
 
-    // Botón definitivo para CREAR SERVER
+    public void IrAlMenuPrincipalDesdeLogIn()
+    {
+        if (panelIntro != null) panelIntro.SetActive(false);
+        if (panelMenuLogIn != null) panelIntro.SetActive(false);
+        if (panelEncontrarPartida != null) panelEncontrarPartida.SetActive(true);
+    }
+
+    public void IrAlMenuPrincipalDesdeSignIn()
+    {
+        if (panelIntro != null) panelIntro.SetActive(false);
+        if (panelSignIn != null) panelSignIn.SetActive(false);
+        if (panelEncontrarPartida != null) panelEncontrarPartida.SetActive(true);
+    }
+
+    public void OpenLoginWindow()
+    {
+        if (panelSignIn != null) panelSignIn.SetActive(false);
+        if (panelLogin != null) panelLogin.SetActive(true);
+    }
+
+    public void OpenSignInWindow()
+    {
+        if (panelLogin != null) panelLogin.SetActive(false);
+        if (panelSignIn != null) panelSignIn.SetActive(true);
+    }
+
+    public void SalirJuegoDirecto()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
+    }
+
+    public void IniciarPartidaRapida()
+    {
+        if (pm != null)
+        {
+            pm.IniciarPartidaRapida6Caracteres();
+        }
+        else
+        {
+            Debug.LogError("No se encontró el PhotonManager en la escena.");
+        }
+    }
+
     public void IntentarCrearServer()
     {
-        // Validamos que los campos no estén vacíos o con puros espacios
         if (string.IsNullOrWhiteSpace(inputNombreCrear.text) || string.IsNullOrWhiteSpace(inputMaxJugadores.text))
         {
             MostrarError();
             return;
         }
 
-        // Si todo está bien, llamamos al manager para que arme la partida
         if (pm != null)
         {
             pm.HostClick();
@@ -53,20 +117,17 @@ public class MenuButtonHelper : MonoBehaviour
         }
     }
 
-    // Botón definitivo para UNIRSE A SERVER
     public void IntentarJoinServer()
     {
-        // Validamos que el campo de nombre no esté vacío
         if (string.IsNullOrWhiteSpace(inputNombreUnirse.text))
         {
             MostrarError();
             return;
         }
 
-        // Si todo está correcto, nos unimos
         if (pm != null)
         {
-            pm.ClienteClick();
+            pm.JoinSelectedGame(inputNombreUnirse.text.Trim());
         }
         else
         {
@@ -86,19 +147,20 @@ public class MenuButtonHelper : MonoBehaviour
         }
     }
 
-    // Para cerrar el mensaje de error con un botón de "OK" o "Cerrar"
     public void CerrarError()
     {
         if (panelError != null) panelError.SetActive(false);
     }
 
-    // ==========================================
-    // NAVEGACIÓN BÁSICA DE MENÚS
-    // ==========================================
-
     public void SearchGameClick() => ActivarPanel(panelSearchGame);
     public void CreateServerMenuClick() => ActivarPanel(panelCreateServer);
     public void JoinServerMenuClick() => ActivarPanel(panelJoinServer);
+
+    public void RegisterUserMenuClick()
+    {
+        if (panelMainMenu != null) panelMainMenu.SetActive(false);
+        ActivarPanel(panelRegisterUser);
+    }
 
     public void Return_MainMenu()
     {

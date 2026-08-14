@@ -1,29 +1,26 @@
 using Fusion;
-using System;
 using UnityEngine;
-using UnityEngine.SocialPlatforms;
 
 public class Handgun : Weapon
 {
     [SerializeField] private NetworkPrefabRef _bulletPrefab;
     [SerializeField] private Transform _firePoint;
 
-    public Handgun() : base(0, 0, 0, 0) { }
+    public Handgun() : base(10, 0.3f, 12, 12) { }
 
     private void Awake()
     {
         damage = 10;
-        fireRate = 0.5f;
-
+        fireRate = 0.3f;
     }
 
     public override void RigidbodyShoot()
     {
-        RPC_RigidBodyShoot(_firePoint.position, _firePoint.rotation);
+        Transform pointToUse = _firePoint != null ? _firePoint : transform;
+        RPC_RigidBodyShoot(pointToUse.position, pointToUse.rotation);
     }
 
-
-    [Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority)]
+    [Rpc(RpcSources.InputAuthority | RpcSources.StateAuthority, RpcTargets.StateAuthority)]
     private void RPC_RigidBodyShoot(Vector3 pos, Quaternion rotation, RpcInfo info = default)
     {
         Runner.Spawn(_bulletPrefab, pos, rotation, info.Source, (runner, obj) => {
@@ -36,15 +33,17 @@ public class Handgun : Weapon
         });
     }
 
-
     public override void RaycastShoot() => RPC_RaycastShoot();
 
-    [Rpc(RpcSources.InputAuthority, RpcTargets.All)]
+    [Rpc(RpcSources.InputAuthority | RpcSources.StateAuthority, RpcTargets.All)]
     public void RPC_RaycastShoot(RpcInfo info = default)
     {
+        if (playerCam == null) playerCam = Camera.main;
+        if (playerCam == null) return;
+
         if (Physics.Raycast(playerCam.transform.position, playerCam.transform.forward, out RaycastHit hit, 100f, layers))
         {
-            Debug.Log("raycast impactó: " + hit.collider.name); 
+            Debug.Log("Raycast impactó: " + hit.collider.name);
 
             if (hit.collider.TryGetComponent(out Health health))
             {
@@ -53,33 +52,24 @@ public class Handgun : Weapon
             }
             else
             {
-                SpawnImpactEffect(hit, false); 
+                SpawnImpactEffect(hit, false);
             }
-        }
-        else
-        {
-            Debug.Log("el raycast no chocó con nada");
         }
     }
 
     private void SpawnImpactEffect(RaycastHit hit, bool isPlayer)
     {
-        if (isPlayer)
+        if (isPlayer && bloodSparksPrefab != null)
         {
-            if (bloodSparksPrefab != null)
-                Instantiate(bloodSparksPrefab, hit.point, Quaternion.LookRotation(hit.normal));
+            Instantiate(bloodSparksPrefab, hit.point, Quaternion.LookRotation(hit.normal));
         }
-        else
+        else if (!isPlayer && bulletHolePrefab != null)
         {
-            if (bulletHolePrefab != null)
-            {
-                GameObject hole = Instantiate(bulletHolePrefab, hit.point + (hit.normal * 0.01f), Quaternion.LookRotation(-hit.normal));
-                hole.transform.SetParent(hit.collider.transform);
-                Destroy(hole, 5f);
-            }
+            GameObject hole = Instantiate(bulletHolePrefab, hit.point + (hit.normal * 0.01f), Quaternion.LookRotation(-hit.normal));
+            hole.transform.SetParent(hit.collider.transform);
+            Destroy(hole, 5f);
         }
-    }   
-
+    }
 
     public override void Reload()
     {

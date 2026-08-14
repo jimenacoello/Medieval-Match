@@ -1,186 +1,279 @@
-using UnityEngine;
 using Fusion;
+using System.Collections.Generic;
 using TMPro;
+using UnityEngine;
 
 public class MatchManager : NetworkBehaviour
 {
-    [Header("UI Panels")]
-    [SerializeField] private GameObject hudprincipal;
-    [SerializeField] private GameObject instruccionesCanvas;
-    [SerializeField] private GameObject hudPartida;
-    [SerializeField] private GameObject victoryCanvas;
-    [SerializeField] private TextMeshProUGUI winnerNameText;
-    [SerializeField] private TextMeshProUGUI timerText;
+    [Header("Configuración del Match")]
+    [SerializeField] private float duracionMatchSegundos = 300f;
+    [SerializeField] private int maxVidas = 5;
 
-    [Header("Configuración")]
-    [SerializeField] private float matchDuration = 300f; 
-    [SerializeField] private int killsToWin = 5;
+    [Header("UI Canvas de Gameplay")]
+    [SerializeField] private GameObject canvasHUD;
+    [SerializeField] private TMP_Text vidasText;
+    [SerializeField] private TMP_Text timerText;
+    [SerializeField] private TMP_Text statsText;
 
-    [Header("Sistema de Vidas")]
-    [SerializeField] private GameObject[] capasVidas;
+    [Header("UI Instrucciones / Espera")]
+    [SerializeField] private GameObject panelInstrucciones;
+    [SerializeField] private GameObject panelWaitingPlayer;
+    [SerializeField] private TMP_Text waitingText;
 
-    [Networked, Capacity(4)]
-    private NetworkDictionary<PlayerRef, int> playerKills => default;
+    [Header("UI Avisos y Fin de Juego")]
+    [SerializeField] private GameObject panelAvisosUI;
+    [SerializeField] private TMP_Text textoAviso;
+    [SerializeField] private GameObject botonVolverHub;
+    [SerializeField] private GameObject botonSalirJuego;
 
-    [Networked] public TickTimer matchTimer { get; set; }
+    [Networked, OnChangedRender(nameof(OnGameStartedChanged))]
+    public bool GameStarted { get; set; }
+
     [Networked] public bool isMatchOver { get; set; }
-    [Networked] public bool gameStarted { get; set; }
+    [Networked] private TickTimer matchTimer { get; set; }
 
-
-    [Networked, OnChangedRender(nameof(AlCambiarEstadoJuego))]
-    public NetworkBool MostrarInstrucciones { get; set; }
+    private bool instruccionesMostradas = false;
+    private Dictionary<PlayerRef, int> playerKills = new Dictionary<PlayerRef, int>();
+    private Dictionary<PlayerRef, int> playerDeaths = new Dictionary<PlayerRef, int>();
 
     public override void Spawned()
     {
-        if (MostrarInstrucciones)
-        {
-            AlCambiarEstadoJuego();
-        }
+        if (canvasHUD != null) canvasHUD.SetActive(true);
+        if (panelAvisosUI != null) panelAvisosUI.SetActive(false);
+        if (botonVolverHub != null) botonVolverHub.SetActive(false);
+        if (botonSalirJuego != null) botonSalirJuego.SetActive(false);
 
-        if (Object.HasStateAuthority)
-        {
-            matchTimer = TickTimer.CreateFromSeconds(Runner, matchDuration);
-            MostrarInstrucciones = true; 
-        }
+        instruccionesMostradas = false;
+
+        VerificarEstadoUI();
+        ActualizarUIStatsLocales();
     }
-
-    void AlCambiarEstadoJuego()
-    {
-        if (MostrarInstrucciones && instruccionesCanvas != null)
-        {
-            hudprincipal.SetActive(true);
-
-            var anim = hudprincipal.GetComponent<Animator>();
-            if (anim != null) anim.Play("Canvas_Pergamino", 0, 0);
-
-            Debug.Log("Canvas activado por red correctamente");
-        }
-    }
-
-    public void FinalizarInstrucciones()
-    {
-        if (instruccionesCanvas != null) instruccionesCanvas.SetActive(false);
-        if (hudPartida != null) hudPartida.SetActive(true);
-        gameStarted = true;
-    }
-
-    public void ActualizarVidasUI(int saludActual, int saludMax)
-    {
-        if (capasVidas == null || capasVidas.Length == 0)
-        {
-            Debug.LogWarning("¡MatchManager no tiene las capas de vida asignadas en el Inspector!");
-            return;
-        }
-
-        float porcentajeSalud = (float)saludActual / saludMax;
-        int capasAActivar = Mathf.CeilToInt(porcentajeSalud * capasVidas.Length);
-
-        Debug.Log($"<color=green>ACTUALIZANDO HUD:</color> Salud {saludActual}. Capas que deberían estar activas: {capasAActivar}");
-
-        for (int i = 0; i < capasVidas.Length; i++)
-        {
-            if (capasVidas[i] != null)
-            {
-                bool estadoAnterior = capasVidas[i].activeSelf;
-                bool nuevoEstado = (i < capasAActivar);
-
-                capasVidas[i].SetActive(nuevoEstado);
-
-                if (estadoAnterior != nuevoEstado)
-                {
-                    Debug.Log($"Capa de vida [{i}] cambiada a: {nuevoEstado}");
-                }
-            }
-        }
-    }
-
 
     public override void FixedUpdateNetwork()
     {
-        if (isMatchOver || !gameStarted) return;
-
-        if (matchTimer.Expired(Runner))
+        if (Object.HasStateAuthority)
         {
-            if (Object.HasStateAuthority)
+            int currentPlayers = Runner.SessionInfo.PlayerCount;
+
+            if (currentPlayers >= 2 && !GameStarted && !isMatchOver)
             {
-                DetermineWinner("¡TIEMPO AGOTADO!");
+                GameStarted = true;
+                matchTimer = TickTimer.CreateFromSeconds(Runner, duracionMatchSegundos);
             }
+            else if (currentPlayers < 2 && GameStarted && !isMatchOver)
+            {
+                GameStarted = false;
+            }
+
+            if (GameStarted && !isMatchOver && matchTimer.Expired(Runner))
+            {
+                FinalizarMatchPorTiempo();
+            }
+        }
+    }
+
+    public override void Render()
+    {
+        if (GameStarted && !isMatchOver && timerText != null && matchTimer.IsRunning)
+        {
+            float tiempoRestante = matchTimer.RemainingTime(Runner) ?? 0f;
+            int minutos = Mathf.FloorToInt(tiempoRestante / 60F);
+            int segundos = Mathf.FloorToInt(tiempoRestante % 60F);
+            timerText.text = string.Format("{0:00}:{1:00}", minutos, segundos);
+        }
+    }
+
+    private void OnGameStartedChanged()
+    {
+        VerificarEstadoUI();
+    }
+
+
+
+    private void VerificarEstadoUI()
+    {
+        if (isMatchOver) return;
+
+        if (!GameStarted)
+        {
+            if (panelWaitingPlayer != null)
+            {
+                panelWaitingPlayer.SetActive(true);
+                if (waitingText != null) waitingText.text = "Esperando a otro jugador para iniciar...";
+            }
+
+            if (panelInstrucciones != null) panelInstrucciones.SetActive(false);
+            if (panelAvisosUI != null) panelAvisosUI.SetActive(false);
         }
         else
         {
-            float? remainingTime = matchTimer.RemainingTime(Runner);
-
-            if (remainingTime.HasValue)
+            if (panelWaitingPlayer != null) panelWaitingPlayer.SetActive(false);
+            if (!instruccionesMostradas)
             {
-                ActualizarTextoTimer(remainingTime.Value);
-            }
-        }
-    }
+                instruccionesMostradas = true;
 
-    private void ActualizarTextoTimer(float tiempo)
-    {
-        if (timerText != null)
-        {
-            int minutos = Mathf.FloorToInt(tiempo / 60);
-            int segundos = Mathf.FloorToInt(tiempo % 60);
-            timerText.text = string.Format("{0:0}:{1:00}", minutos, segundos);
-        }
-    }
-
-    public void PlayerKilled(PlayerRef victim, PlayerRef killer)
-    {
-        if (!Object.HasStateAuthority || isMatchOver) return;
-
-        int currentKills = 0;
-        if (playerKills.ContainsKey(killer)) currentKills = playerKills[killer];
-        currentKills++;
-        playerKills.Set(killer, currentKills);
-
-        Debug.Log($"Jugador {killer} lleva {currentKills} bajas.");
-
-        if (currentKills >= killsToWin)
-        {
-            DetermineWinner("¡LÍMITE DE BAJAS ALCANZADO!");
-        }
-    }
-
-    public void DetermineWinner(string reason)
-    {
-        if (isMatchOver) return;
-        isMatchOver = true;
-
-        string winnerName = "Empate";
-        int maxKills = -1;
-        PlayerRef winnerRef = PlayerRef.None;
-
-        foreach (var entry in playerKills)
-        {
-            if (entry.Value > maxKills)
-            {
-                maxKills = entry.Value;
-                winnerRef = entry.Key;
+                if (panelInstrucciones != null)
+                {
+                    panelInstrucciones.SetActive(true);
+                    Animator anim = panelInstrucciones.GetComponent<Animator>();
+                    if (anim != null)
+                    {
+                        anim.enabled = true;
+                        anim.Play(0, -1, 0f);
+                    }
+                }
             }
         }
 
-        if (winnerRef != PlayerRef.None)
+    }
+
+
+    private void ApagarPanelInstrucciones()
+    {
+        if (panelInstrucciones != null)
         {
-            int hostId = -1;
-            foreach (var p in Runner.ActivePlayers) { hostId = p.PlayerId; break; }
-            winnerName = (winnerRef.PlayerId == hostId) ? "HOST" : "INVITADO";
+            Animator anim = panelInstrucciones.GetComponent<Animator>();
+            if (anim != null)
+            {
+                anim.enabled = false;
+            }
+
+            Animator[] childAnimators = panelInstrucciones.GetComponentsInChildren<Animator>();
+            foreach (var childAnim in childAnimators)
+            {
+                childAnim.enabled = false;
+            }
+
+            panelInstrucciones.SetActive(false);
+
+            CanvasGroup cg = panelInstrucciones.GetComponent<CanvasGroup>();
+            if (cg != null) { cg.alpha = 0; cg.blocksRaycasts = false; }
         }
 
-        RPC_EndMatch(reason, winnerName);
+        if (panelWaitingPlayer != null)
+        {
+            panelWaitingPlayer.SetActive(false);
+        }
+    }
+
+
+    public void FinalizarInstrucciones()
+    {
+        if (panelInstrucciones != null)
+        {
+            Animator anim = panelInstrucciones.GetComponent<Animator>();
+            if (anim != null) anim.enabled = false;
+
+            panelInstrucciones.SetActive(false);
+        }
+
+        if (canvasHUD != null) canvasHUD.SetActive(true);
+    }
+
+    public void PlayerKilled(PlayerRef victim, PlayerRef killer) => RegistrarBaja(killer, victim);
+
+    public void RegistrarBaja(PlayerRef killer, PlayerRef victim)
+    {
+        if (!Object.HasStateAuthority || isMatchOver || !GameStarted) return;
+
+        if (!playerKills.ContainsKey(killer)) playerKills[killer] = 0;
+        if (!playerDeaths.ContainsKey(victim)) playerDeaths[victim] = 0;
+
+        playerKills[killer]++;
+        playerDeaths[victim]++;
+
+        RPC_NotificarBaja(killer, victim);
+
+        if (playerDeaths[victim] >= maxVidas)
+        {
+            FinalizarMatchPorVidas(killer);
+        }
     }
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-    private void RPC_EndMatch(string reason, string winner)
+    private void RPC_NotificarBaja(PlayerRef killer, PlayerRef victim)
+    {
+        if (Runner.LocalPlayer == killer && StatManager.Instance != null) StatManager.Instance.RegistrarKill();
+        if (Runner.LocalPlayer == victim && StatManager.Instance != null) StatManager.Instance.RegistrarMuerte();
+
+        ActualizarUIStatsLocales();
+    }
+
+    public void ActualizarVidasUI(int currentHealth, int maxHealth) => ActualizarUIStatsLocales();
+
+    public void ActualizarUIStatsLocales()
+    {
+        int muertesLocales = StatManager.Instance != null ? StatManager.Instance.deathsCount : 0;
+        int killsLocales = StatManager.Instance != null ? StatManager.Instance.killCount : 0;
+        int vidasRestantes = Mathf.Clamp(maxVidas - muertesLocales, 0, maxVidas);
+
+        if (vidasText != null) vidasText.text = $"Vidas: {vidasRestantes}/{maxVidas}";
+        if (statsText != null) statsText.text = $"Kills: {killsLocales} | Muertes: {muertesLocales}";
+    }
+
+    private void FinalizarMatchPorVidas(PlayerRef ganador)
     {
         isMatchOver = true;
-        hudPartida.SetActive(false);
-        victoryCanvas.SetActive(true);
-        winnerNameText.text = $"{reason}\nGANADOR: {winner}";
+        GameStarted = false;
+        RPC_FinalizarPartida(ganador);
+    }
+
+    private void FinalizarMatchPorTiempo()
+    {
+        isMatchOver = true;
+        GameStarted = false;
+
+        PlayerRef ganador = PlayerRef.None;
+        int maxKills = -1;
+
+        foreach (var kvp in playerKills)
+        {
+            if (kvp.Value > maxKills)
+            {
+                maxKills = kvp.Value;
+                ganador = kvp.Key;
+            }
+        }
+
+        RPC_FinalizarPartida(ganador);
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_FinalizarPartida(PlayerRef ganador)
+    {
+        isMatchOver = true;
+        MostrarUIFinDeJuego(ganador);
+
+        if (PlayfabManager.Instance != null)
+        {
+            PlayfabManager.Instance.UploadDataInPlayfab();
+        }
+    }
+
+    private void MostrarUIFinDeJuego(PlayerRef ganador)
+    {
+        if (panelInstrucciones != null) panelInstrucciones.SetActive(false);
+        if (panelWaitingPlayer != null) panelWaitingPlayer.SetActive(false);
 
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
+
+        if (panelAvisosUI != null)
+        {
+            panelAvisosUI.SetActive(true);
+
+            if (textoAviso != null)
+            {
+                if (ganador == Runner.LocalPlayer)
+                    textoAviso.text = "¡VICTORIA!\nHas eliminado a tu rival.";
+                else if (ganador != PlayerRef.None)
+                    textoAviso.text = "DERROTA\nTe has quedado sin vidas.";
+                else
+                    textoAviso.text = "¡EMPATE!\nSe agotó el tiempo de partida.";
+            }
+
+            if (botonVolverHub != null) botonVolverHub.SetActive(true);
+            if (botonSalirJuego != null) botonSalirJuego.SetActive(true);
+        }
     }
 }

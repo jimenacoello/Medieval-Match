@@ -1,6 +1,5 @@
-using UnityEngine;
 using Fusion;
-using UnityEngine.Events;
+using UnityEngine;
 using UnityEngine.UI;
 
 public class Health : NetworkBehaviour
@@ -17,6 +16,7 @@ public class Health : NetworkBehaviour
         {
             NetworkedHealth = maxHealth;
         }
+        ActualizarUI();
     }
 
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
@@ -24,25 +24,26 @@ public class Health : NetworkBehaviour
     {
         if (NetworkedHealth <= 0) return;
 
-        Debug.Log($"<color=red>DAÑO RECIBIDO:</color> {_damage} puntos de {shooter}. Vida antes: {NetworkedHealth}");
+        if (shooter != PlayerRef.None && shooter == Object.InputAuthority) return;
 
-        NetworkedHealth -= _damage;
-
-        Debug.Log($"<color=orange>VIDA ACTUALIZADA EN RED:</color> {NetworkedHealth}");
+        NetworkedHealth = Mathf.Max(0, NetworkedHealth - _damage);
 
         if (NetworkedHealth <= 0)
         {
-            Debug.Log("<color=black><b>MUERTE DETECTADA</b></color>");
             MatchManager mm = FindFirstObjectByType<MatchManager>();
             if (mm != null) mm.PlayerKilled(Object.InputAuthority, shooter);
+
             StartCoroutine(RespawnSequence());
         }
     }
 
-    void OnHealthChanged()
+    private void OnHealthChanged()
     {
-        Debug.Log($"<color=cyan>OnHealthChanged disparado.</color> Nueva vida: {NetworkedHealth} para el jugador {Object.InputAuthority}");
+        ActualizarUI();
+    }
 
+    private void ActualizarUI()
+    {
         if (healthBar != null)
         {
             healthBar.fillAmount = (float)NetworkedHealth / maxHealth;
@@ -53,7 +54,7 @@ public class Health : NetworkBehaviour
             MatchManager mm = FindFirstObjectByType<MatchManager>();
             if (mm != null)
             {
-                mm.ActualizarVidasUI(NetworkedHealth, maxHealth);
+                mm.ActualizarUIStatsLocales();
             }
         }
     }
@@ -62,12 +63,13 @@ public class Health : NetworkBehaviour
     {
         transform.position = new Vector3(0, -100, 0);
 
-        yield return new WaitForSeconds(3f); // tiempo de espera pa revivir
+        yield return new WaitForSeconds(3f);
 
-        NetworkedHealth = maxHealth;
-
-        // respawn en otra locacion 
-        transform.position = new Vector3(Random.Range(-5, 5), 5, Random.Range(-5, 5));
+        MatchManager mm = FindFirstObjectByType<MatchManager>();
+        if (mm != null && !mm.isMatchOver)
+        {
+            NetworkedHealth = maxHealth;
+            transform.position = new Vector3(Random.Range(-5, 5), 5, Random.Range(-5, 5));
+        }
     }
-
 }

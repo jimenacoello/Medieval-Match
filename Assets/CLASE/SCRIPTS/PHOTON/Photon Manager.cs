@@ -1,7 +1,6 @@
 using Fusion;
 using Fusion.Sockets;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -17,20 +16,14 @@ public class PhotonManager : MonoBehaviour, INetworkRunnerCallbacks
     private NetworkRunner runner;
     private bool isStartingGame = false;
 
-    [SerializeField] private GameObject canvasUI;
-    private GameMode selectedGameMode;
-
-    [SerializeField] private UnityEvent onPlayerJoinedEvent; 
-    [SerializeField] UnityEvent<List<SessionInfo>> _onSessionListUpdated;
+    [SerializeField] private UnityEvent onPlayerJoinedEvent;
+    [SerializeField] private UnityEvent<List<SessionInfo>> _onSessionListUpdated;
 
     [SerializeField] private NetworkPrefabRef playerPrefab;
-    [SerializeField] private GameObject[] dontDestroyOnLoadObjs;
-    [SerializeField] private GameObject canvasDelTimer;
 
     [Header("UI de Creación de Partida")]
     [SerializeField] private TMP_InputField serverNameInput;
     [SerializeField] private TMP_InputField maxPlayersInput;
-    [SerializeField] private TMP_Text errorFeedbackTxt;
 
     [Header("Generador de Nombres")]
     [Min(4)]
@@ -38,6 +31,8 @@ public class PhotonManager : MonoBehaviour, INetworkRunnerCallbacks
 
     [Header("UI Panels")]
     [SerializeField] public GameObject lobbyMenuCanvas;
+    [SerializeField] private GameObject panelErrorRed;
+    [SerializeField] private TMP_Text errorText;
 
     private void Awake()
     {
@@ -78,30 +73,38 @@ public class PhotonManager : MonoBehaviour, INetworkRunnerCallbacks
         await runner.JoinSessionLobby(SessionLobby.Custom, "MiLobbyUnicoDoomMatch");
     }
 
+    public async void IniciarPartidaRapida6Caracteres()
+    {
+        string codigoAleatorio = GenerarCodigoAleatorio(sessionNameLength);
+        await StartRandomGame(GameMode.Host, codigoAleatorio, 2);
+    }
+
+    private string GenerarCodigoAleatorio(int length)
+    {
+        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        char[] stringChars = new char[length];
+        System.Random random = new System.Random();
+
+        for (int i = 0; i < stringChars.Length; i++)
+        {
+            stringChars[i] = chars[random.Next(chars.Length)];
+        }
+        return new string(stringChars);
+    }
+
     public async void HostClick()
     {
-        Debug.Log("Se ha entrado como Host");
-
-        string nombreSesion = string.IsNullOrEmpty(serverNameInput?.text) ? "MiPartida" : serverNameInput.text;
-        int maxJugadores = 4;
+        string nombreSesion = string.IsNullOrEmpty(serverNameInput?.text) ? GenerarCodigoAleatorio(6) : serverNameInput.text;
+        int maxJugadores = 2;
         if (maxPlayersInput != null && !string.IsNullOrWhiteSpace(maxPlayersInput.text))
         {
             if (int.TryParse(maxPlayersInput.text.Trim(), out int numeroConvertido))
             {
                 maxJugadores = Mathf.Clamp(numeroConvertido, 2, 10);
-                maxPlayersInput.text = maxJugadores.ToString();
             }
         }
 
         await StartRandomGame(GameMode.Host, nombreSesion, maxJugadores);
-        ActivarHUD();
-    }
-
-    public async void ClienteClick()
-    {
-        Debug.Log("Se ha entrado como Cliente");
-        await StartRandomGame(GameMode.Client, "MiPartida", 4);
-        ActivarHUD();
     }
 
     private async Task StartRandomGame(GameMode mode, string sessionName, int maxPlayers)
@@ -116,10 +119,6 @@ public class PhotonManager : MonoBehaviour, INetworkRunnerCallbacks
         var sceneInfo = new NetworkSceneInfo();
         sceneInfo.AddSceneRef(scene, LoadSceneMode.Single);
 
-        var sessionProperties = new Dictionary<string, SessionProperty>();
-        sessionProperties.Add("GameMode", "DoomMatch");
-        sessionProperties.Add("Map", "Stadium");
-
         var result = await runner.StartGame(new StartGameArgs
         {
             GameMode = mode,
@@ -127,92 +126,12 @@ public class PhotonManager : MonoBehaviour, INetworkRunnerCallbacks
             PlayerCount = maxPlayers,
             Scene = sceneInfo,
             CustomLobbyName = "CUSTOM SERVER #" + sessionName,
-            SceneManager = GetComponent<NetworkSceneManagerDefault>() ?? gameObject.AddComponent<NetworkSceneManagerDefault>(),
-            SessionProperties = sessionProperties
+            SceneManager = GetComponent<NetworkSceneManagerDefault>() ?? gameObject.AddComponent<NetworkSceneManagerDefault>()
         });
 
-        if (result.Ok)
+        if (!result.Ok)
         {
-            Debug.Log("Juego iniciado correctamente");
-            DisableCanvasScene();
-        }
-        else
-        {
-            Debug.LogError($"Error al iniciar: {result.ShutdownReason}");
-            isStartingGame = false;
-        }
-    }
-
-    public async void StartCustomGame()
-    {
-        if (isStartingGame) return;
-
-        if (errorFeedbackTxt != null) errorFeedbackTxt.text = "";
-
-        if (runner == null)
-        {
-            runner = FindAnyObjectByType<NetworkRunner>();
-        }
-
-        if (runner == null)
-        {
-            Debug.LogWarning("no se puede crear la partida pa: no tai conectado al poton");
-            if (errorFeedbackTxt != null) errorFeedbackTxt.text = "horror: perate pa conectarte";
-            return;
-        }
-
-        if (serverNameInput == null || string.IsNullOrWhiteSpace(serverNameInput.text))
-        {
-            if (errorFeedbackTxt != null) errorFeedbackTxt.text = "ojito falta el nombre del servidor";
-            return;
-        }
-        string customServerName = serverNameInput.text.Trim();
-        int customPlayerCount = 4;
-
-        if (int.TryParse(maxPlayersInput.text.Trim(), out int parsedPlayers))
-        {
-            customPlayerCount = Mathf.Clamp(parsedPlayers, 2, 10);
-            maxPlayersInput.text = customPlayerCount.ToString();
-        }
-        else
-        {
-            if (errorFeedbackTxt != null) errorFeedbackTxt.text = "ojito, mal parámetro pa, usa numeros.";
-            return;
-        }
-        isStartingGame = true;
-        runner.ProvideInput = true;
-
-        var scene = SceneRef.FromIndex(1);
-        var sceneInfo = new NetworkSceneInfo();
-        sceneInfo.AddSceneRef(scene, LoadSceneMode.Single);
-
-        var sessionProperties = new Dictionary<string, SessionProperty>();
-        sessionProperties.Add("GameMode", "DoomMatch");
-        sessionProperties.Add("Map", "Stadium");
-
-        Debug.Log($"Iniciando Custom Lobby: '{customServerName}' para [{customPlayerCount}] jugadores.");
-
-        var result = await runner.StartGame(new StartGameArgs
-        {
-            GameMode = GameMode.Host,
-            SessionName = customServerName,
-            PlayerCount = customPlayerCount,
-            Scene = sceneInfo,
-            CustomLobbyName = "CUSTOM SERVER #" + customServerName,
-            SceneManager = GetComponent<NetworkSceneManagerDefault>() ?? gameObject.AddComponent<NetworkSceneManagerDefault>(),
-            SessionProperties = sessionProperties,
-        });
-
-        if (result.Ok)
-        {
-            Debug.Log("Custom Lobby creado de manera exitosaAAAAAAAAAAA.");
-            DisableCanvasScene();
-            ActivarHUD();
-        }
-        else
-        {
-            Debug.LogError($"Error al iniciar Custom Lobby: {result.ShutdownReason}");
-            if (errorFeedbackTxt != null) errorFeedbackTxt.text = $"Error de red: {result.ShutdownReason}";
+            MostrarErrorRed($"Error al iniciar la sesión: {result.ShutdownReason}");
             isStartingGame = false;
         }
     }
@@ -229,8 +148,6 @@ public class PhotonManager : MonoBehaviour, INetworkRunnerCallbacks
         var sceneInfo = new NetworkSceneInfo();
         sceneInfo.AddSceneRef(scene, LoadSceneMode.Single);
 
-        Debug.Log($"conectando a la sesion: {sessionName}");
-
         var result = await runner.StartGame(new StartGameArgs()
         {
             GameMode = GameMode.Client,
@@ -239,59 +156,33 @@ public class PhotonManager : MonoBehaviour, INetworkRunnerCallbacks
             SceneManager = GetComponent<NetworkSceneManagerDefault>() ?? gameObject.AddComponent<NetworkSceneManagerDefault>(),
         });
 
-        if (result.Ok)
+        if (!result.Ok)
         {
-            DisableCanvasScene();
-            ActivarHUD();
-        }
-        else
-        {
-            Debug.LogError($"fallo al unirse a la sesion: {result.ShutdownReason}");
+            MostrarErrorRed($"No se logró conectar a la partida: {result.ShutdownReason}");
             isStartingGame = false;
         }
     }
 
-    private void DisableCanvasScene()
+    public async void VolverAlMenuPrincipal()
     {
-        try
+        if (runner != null)
         {
-            Scene canvasScene = SceneManager.GetSceneByBuildIndex(0);
-            if (canvasScene.isLoaded)
-            {
-                GameObject[] rootObjects = canvasScene.GetRootGameObjects();
-                foreach (GameObject obj in rootObjects) obj.SetActive(false);
-                Debug.Log("Canvas desactivao");
-            }
+            await runner.Shutdown();
         }
-        catch (Exception e)
-        {
-            Debug.LogWarning($"No se pudo desactivar canvas por : {e.Message}");
-        }
+        SceneManager.LoadScene(0);
     }
 
-    private IEnumerator UnloadCanvasScene()
+    private void MostrarErrorRed(string mensaje)
     {
-        yield return null;
-        DisableCanvasScene();
-    }
-
-    private void LoadCanvasScene()
-    {
-        if (!SceneManager.GetSceneByBuildIndex(0).isLoaded)
+        if (panelErrorRed != null)
         {
-            SceneManager.LoadScene(1, LoadSceneMode.Additive);
+            panelErrorRed.SetActive(true);
+            if (errorText != null) errorText.text = mensaje;
         }
         else
         {
-            Scene canvasScene = SceneManager.GetSceneByBuildIndex(1);
-            GameObject[] rootObjects = canvasScene.GetRootGameObjects();
-            foreach (GameObject obj in rootObjects) obj.SetActive(true);
+            Debug.LogError(mensaje);
         }
-    }
-
-    private void ActivarHUD()
-    {
-        if (canvasDelTimer != null) canvasDelTimer.SetActive(true);
     }
 
     public async void SalirClick()
@@ -303,12 +194,10 @@ public class PhotonManager : MonoBehaviour, INetworkRunnerCallbacks
 #endif
     }
 
-
     public void OnPlayerJoined(NetworkRunner runner, PlayerRef player)
     {
         if (runner.IsServer)
         {
-            Debug.Log($"[Photon] Jugador detectado: {player}. Instanciando Prefab...");
             SpawnLocalPlayer(runner, player);
         }
         onPlayerJoinedEvent?.Invoke();
@@ -318,38 +207,48 @@ public class PhotonManager : MonoBehaviour, INetworkRunnerCallbacks
     {
         Vector3 spawnPosition = new Vector3(UnityEngine.Random.Range(-2f, 2f), 1f, UnityEngine.Random.Range(-2f, 2f));
         NetworkObject networkedPlayer = runner.Spawn(playerPrefab, spawnPosition, Quaternion.identity, player);
-
         runner.SetPlayerObject(player, networkedPlayer);
-        Debug.Log($"¡Prefab instanciado de forma exitosa para el jugador [{player}] en {spawnPosition}!");
     }
 
-    public void OnSceneLoadDone(NetworkRunner runner)
+    public void OnShutdown(NetworkRunner runner, ShutdownReason shutdownReason)
     {
-        Debug.Log("Cambio de escena detectado por Fusion.");
-        GameObject hudViejo = GameObject.Find("Canvas_HUD");
-        if (hudViejo != null)
+        if (shutdownReason != ShutdownReason.Ok)
         {
-            hudViejo.SetActive(false);
+            string razonTexto = shutdownReason.ToString();
+            string mensajeError = $"Se perdió la conexión con la partida ({razonTexto}).";
+
+            // Evaluamos por texto para evitar errores de compilación según la versión del SDK
+            if (razonTexto.Contains("Host") || razonTexto.Contains("Server") || razonTexto.Contains("Disconnected"))
+            {
+                mensajeError = "La partida fue cerrada por el servidor/host o te has desconectado.";
+            }
+
+            MostrarErrorRed(mensajeError);
         }
+        isStartingGame = false;
     }
+
 
     public void OnConnectedToServer(NetworkRunner runner) { }
     public void OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason) { }
     public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
     public void OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
-    public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason) { }
+    public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason)
+    {
+        MostrarErrorRed($"Desconectado del servidor. Razón: {reason}");
+    }
     public void OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken) { }
     public void OnInput(NetworkRunner runner, NetworkInput input)
     {
-        var customInput = new MovementController.GameplayInput();
-
-        customInput.MoveDirection.x = Input.GetAxisRaw("Horizontal");
-        customInput.MoveDirection.y = Input.GetAxisRaw("Vertical");
-
-        customInput.LookRotationDelta.x = Input.GetAxis("Mouse X");
-        customInput.LookRotationDelta.y = Input.GetAxis("Mouse Y");
-
-        customInput.IsRunning = Input.GetKey(KeyCode.LeftShift);
+        var customInput = new MovementController.GameplayInput
+        {
+            MoveDirection = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical")),
+            LookRotationDelta = new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y")),
+            IsRunning = Input.GetKey(KeyCode.LeftShift),
+            // IMPORTANTE: Capturamos el disparo aquí para transmitirlo por red
+            isShooting = Input.GetMouseButtonDown(0) || Input.GetMouseButton(0),
+            isReloading = Input.GetKeyDown(KeyCode.R)
+        };
 
         input.Set(customInput);
     }
@@ -360,6 +259,6 @@ public class PhotonManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
     public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
     public void OnSceneLoadStart(NetworkRunner runner) { }
-    public void OnShutdown(NetworkRunner runner, ShutdownReason shutdownReason) { LoadCanvasScene(); isStartingGame = false; }
+    public void OnSceneLoadDone(NetworkRunner runner) { }
     public void OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
 }

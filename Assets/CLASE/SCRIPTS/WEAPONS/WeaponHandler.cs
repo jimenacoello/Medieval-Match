@@ -2,19 +2,13 @@ using Fusion;
 using System;
 using UnityEngine;
 
-
-
-
-
 public class WeaponHandler : NetworkBehaviour
 {
     [SerializeField] private Weapon actualWeapon;
 
-    // aca se manejan el arma que el jugador tiene equipada,
-    // y vamos a llamar a los metodos de disparo y recarga del
-    // arma desde aqui
-    private Action ShootAction;
+    [Networked] private TickTimer cooldownDisparo { get; set; }
 
+    private Action ShootAction;
 
     public override void Spawned()
     {
@@ -34,21 +28,19 @@ public class WeaponHandler : NetworkBehaviour
 
     public override void FixedUpdateNetwork()
     {
-        if (!HasInputAuthority) return;
-
-        if(GetInput(out InputInfo input))
+        if (GetInput(out MovementController.GameplayInput input))
         {
-        
-            if(input.isShooting && ShootAction != null)
+            if (input.isShooting && ShootAction != null && cooldownDisparo.ExpiredOrNotRunning(Runner))
             {
+                cooldownDisparo = TickTimer.CreateFromSeconds(Runner, actualWeapon.GetFireRate());
+
                 ShootAction();
             }
 
-            if(input.isReloading && actualWeapon != null)
+            if (input.isReloading && actualWeapon != null)
             {
                 actualWeapon.Reload();
             }
-       
         }
     }
 }

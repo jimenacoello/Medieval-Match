@@ -7,15 +7,19 @@ public class MovementController : NetworkBehaviour
     [SerializeField] private Animator _animator;
     [SerializeField] private float walkSpeed = 5.5f;
     [SerializeField] private float runSpeed = 7.7f;
-    [SerializeField] private float mouseSensitivity = 10.0f;
+    [SerializeField] private float mouseSensitivity = 20.0f;
 
     [SerializeField] public SimpleKCC _simpleKCC;
+
+    private MatchManager _matchManager;
 
     public struct GameplayInput : INetworkInput
     {
         public Vector2 MoveDirection;
         public Vector2 LookRotationDelta;
         public NetworkBool IsRunning;
+        public NetworkBool isShooting;
+        public NetworkBool isReloading;
     }
 
     public override void Spawned()
@@ -24,17 +28,23 @@ public class MovementController : NetworkBehaviour
 
         _simpleKCC.SetPosition(transform.position);
         _simpleKCC.SetActive(true);
+
+        _matchManager = FindAnyObjectByType<MatchManager>();
     }
 
     public override void FixedUpdateNetwork()
     {
-        if (FindAnyObjectByType<MatchManager>() != null && FindAnyObjectByType<MatchManager>().isMatchOver) return;
+        if (_matchManager == null) _matchManager = FindAnyObjectByType<MatchManager>();
+
+        if (_matchManager != null && (_matchManager.isMatchOver || !_matchManager.GameStarted))
+        {
+            RPC_UpdateAnimations(Vector2.zero, false);
+            return;
+        }
 
         if (GetInput(out GameplayInput input))
         {
             _simpleKCC.AddLookRotation(new Vector2(-input.LookRotationDelta.y, input.LookRotationDelta.x) * mouseSensitivity);
-
-            // Procesar el movimiento físico
             Movement(input);
 
             if (HasInputAuthority)

@@ -4,7 +4,14 @@ public class AnimationHelper : MonoBehaviour
 {
     public void TriggerFinalizarInstrucciones()
     {
-        // Busca el MatchManager en la escena y llama al método
-        FindObjectOfType<MatchManager>().FinalizarInstrucciones();
+        MatchManager mm = Object.FindFirstObjectByType<MatchManager>();
+        if (mm != null)
+        {
+            mm.FinalizarInstrucciones();
+        }
+        else
+        {
+            gameObject.SetActive(false);
+        }
     }
 }

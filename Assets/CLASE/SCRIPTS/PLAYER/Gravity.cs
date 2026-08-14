@@ -1,19 +1,21 @@
 using Fusion;
-using System;
+using Fusion.Addons.SimpleKCC;
 using UnityEngine;
 
 public class Gravity : NetworkBehaviour
 {
-    [SerializeField] private float gravityForce = 9.8f;
+    [SerializeField] private float gravityForce = 19.6f;
     [SerializeField] private bool usesGroundCheck;
 
     [Networked] private float acceleration { get; set; }
 
     private GroundCheck groundCheck;
+    private SimpleKCC kcc;
     private Rigidbody rb;
 
     public override void Spawned()
     {
+        kcc = GetComponent<SimpleKCC>();
         rb = GetComponent<Rigidbody>();
         if (usesGroundCheck)
         {
@@ -28,18 +30,22 @@ public class Gravity : NetworkBehaviour
 
     private void ApplyGravityLogic()
     {
-        if (usesGroundCheck && groundCheck != null)
+        if (usesGroundCheck && groundCheck != null && groundCheck.IsGrounded())
         {
-            if (groundCheck.IsGrounded())
-            {
-                acceleration = 0;
-                return;
-            }
+            acceleration = 0;
+            return;
         }
 
         acceleration += Runner.DeltaTime;
 
-        Vector3 gravityVector = Vector3.down * gravityForce * acceleration;
-        rb.AddForce(gravityVector, ForceMode.Acceleration);
+        if (kcc != null)
+        {
+            kcc.SetGravity(-gravityForce * acceleration);
+        }
+        else if (rb != null && !rb.isKinematic)
+        {
+            Vector3 gravityVector = Vector3.down * gravityForce * acceleration;
+            rb.AddForce(gravityVector, ForceMode.Acceleration);
+        }
     }
 }

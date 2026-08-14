@@ -1,107 +1,330 @@
-using UnityEngine;
 using PlayFab;
 using PlayFab.ClientModels;
-using System.Threading.Tasks;
-using System.Collections;
 using System;
-
+using System.Collections;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using TMPro;
+using UnityEngine;
 
 public class PlayfabManager : MonoBehaviour
 {
+    [Header("Campos de Login")]
+    [SerializeField] private TMP_InputField loginEmail;
+    [SerializeField] private TMP_InputField loginPassword;
 
+    [Header("Campos de Sign In (Registro)")]
+    [SerializeField] private TMP_InputField registerUsername;
+    [SerializeField] private TMP_InputField registerEmail;
+    [SerializeField] private TMP_InputField registerPassword;
+    [SerializeField] private TMP_InputField registerConfirmPassword;
+
+    [Header("Feedback de UI / Errores")]
+    [SerializeField] private GameObject panelError;
+    [SerializeField] private TMP_Text errorText;
+
+    [Header("Paneles de Menú")]
+    [SerializeField] private GameObject panelAutenticacion;
+    [SerializeField] private GameObject panelMenuJuego;
+
+    public event Action<Dictionary<string, string>> onRetriverData;
+    public static PlayfabManager Instance;
+
+    private Coroutine errorCoroutine;
+
+    private void Awake()
+    {
+        if (Instance == null) Instance = this;
+        else Destroy(gameObject);
+    }
 
     private void Start()
     {
-        if (string.IsNullOrEmpty(PlayFabSettings.TitleId)) // para verificar que tengamos un titleid
+        if (string.IsNullOrEmpty(PlayFabSettings.TitleId))
         {
             PlayFabSettings.TitleId = "1B4AF0";
         }
 
-        if (string.IsNullOrEmpty(PlayFabSettings.DeveloperSecretKey)) // para verificar que tengamos un developer secret key
+        if (panelError != null) panelError.SetActive(false);
+    }
+
+    public void SeleccionarColor(string colorHex)
+    {
+        StatManager.playerColor = colorHex;
+        Debug.Log($"Color seleccionado: {colorHex}");
+
+        if (PlayfabManager.Instance != null)
         {
-            PlayFabSettings.DeveloperSecretKey = "DC8JHG5II35G3GOX5W8UGS4RSWBR39R11GYEYIM45XB3QR97HY";
+            PlayfabManager.Instance.UploadDataInPlayfab();
         }
-    }
+    } 
 
-    //crear un metodo donde sellevara a cabo la logica para crear un usuario
-    public void RegisterUser()
+    public async void RegisterUserInPlayfab()
     {
-       RegisterPlayFabUserRequest request = new RegisterPlayFabUserRequest()
+        if (string.IsNullOrWhiteSpace(registerEmail.text) ||
+            string.IsNullOrWhiteSpace(registerUsername.text) ||
+            string.IsNullOrWhiteSpace(registerPassword.text) ||
+            string.IsNullOrWhiteSpace(registerConfirmPassword.text))
         {
-            Email = "",
-            Username = "",
-            Password = "",
-            RequireBothUsernameAndEmail = true,
+            MostrarErrorUI("Por favor llena todos los campos de registro.");
+            return;
+        }
 
-        };
-        
-        PlayFabClientAPI.RegisterPlayFabUser(request, OnRegisterUserSuccess, OnPlayFabError); //solicitud, lo que va a pasar si sale bn, lo que pasa si sale mal ;(
-        // cada solicitud tiene el que pasa si salio bien o si salio mal 
-    }
+        if (registerPassword.text != registerConfirmPassword.text)
+        {
+            MostrarErrorUI("Las contraseñas no coinciden. Verifícalas.");
+            return;
+        }
 
-
-
-    public void OnRegisterUserSuccess (RegisterPlayFabUserResult result) // en la variable de result playfab nos manda datos de nuestra cuenta
-    {
-       
-    }
-
-    public void OnPlayFabError(PlayFabError error) // en la variable de error va recibir un msj de playfab indicando el horror
-    {
-        Debug.Log(error);
-    }
-
-    //---------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-    public async void RegisterUserInPlayfab() // este metodo async se va a mandar a llamar desde un boton
-    {
         try
         {
-            var registerTask = RegisterUserInPlayfabTask(); // esperamos a que se complete la tarea
-            await RegisterUserInPlayfabTask();// esperar a que se realice la conexión o intento de registro de usuario
+            var result = await RegisterUserInPlayfabTask();
+            Debug.Log($"Usuario registrado correctamente con ID: {result.PlayFabId}");
 
-            Debug.Log("se ha iniciado sesion correctamente pa");
+            string passwordUsada = registerPassword.text;
+            string emailUsado = registerEmail.text.Trim();
+            registerPassword.text = string.Empty;
+            registerConfirmPassword.text = string.Empty;
+
+            await AutoLoginTrasRegistro(emailUsado, passwordUsada);
         }
         catch (Exception error)
         {
-            Debug.Log(error.Message);
+            MostrarErrorUI("Error al registrar cuenta: " + error.Message);
+        }
+    }
+
+    public Task<RegisterPlayFabUserResult> RegisterUserInPlayfabTask()
+    {
+        var taskSource = new TaskCompletionSource<RegisterPlayFabUserResult>();
+
+        RegisterPlayFabUserRequest request = new RegisterPlayFabUserRequest()
+        {
+            Email = registerEmail.text.Trim(),
+            Username = registerUsername.text.Trim(),
+            Password = registerPassword.text,
+            RequireBothUsernameAndEmail = true
+        };
+
+        PlayFabClientAPI.RegisterPlayFabUser(request,
+            resultCallback => taskSource.SetResult(resultCallback),
+            errorCallback => taskSource.SetException(new Exception(errorCallback.GenerateErrorReport()))
+        );
+
+        return taskSource.Task;
+    }
+
+    private async Task AutoLoginTrasRegistro(string email, string password)
+    {
+        try
+        {
+            var taskSource = new TaskCompletionSource<LoginResult>();
+            LoginWithEmailAddressRequest request = new LoginWithEmailAddressRequest()
+            {
+                Email = email,
+                Password = password
+            };
+
+            PlayFabClientAPI.LoginWithEmailAddress(request,
+                resultCallback => taskSource.SetResult(resultCallback),
+                errorCallback => taskSource.SetException(new Exception(errorCallback.GenerateErrorReport()))
+            );
+
+            await taskSource.Task;
+
+            IngresarAlJuego();
+        }
+        catch (Exception error)
+        {
+            MostrarErrorUI("Registro exitoso, pero hubo un error al iniciar sesión automáticamente: " + error.Message);
         }
     }
 
 
-    public async Task<RegisterPlayFabUserResult> RegisterUserInPlayfabTask()
+    public async void LoginUserInPlayfab()
     {
-        var taskSource = new TaskCompletionSource<RegisterPlayFabUserResult>();
-        // nos crea una variable que espera un tipo de resultado esp para la tarea
-        // pero dentro de esa variable se guarda tanto el resultado como el error
-        // taskcompletionsource te la toma en cuenta como si fuera el tipo de dato esperado
-
-        RegisterPlayFabUserRequest request = new RegisterPlayFabUserRequest()
+        if (string.IsNullOrWhiteSpace(loginEmail.text) || string.IsNullOrWhiteSpace(loginPassword.text))
         {
-            Email = "",
-            Username = "",
-            Password = "",
-            RequireBothUsernameAndEmail = true,
+            MostrarErrorUI("Ingresa tu correo y contraseña para iniciar sesión.");
+            return;
+        }
 
+        try
+        {
+            await LoginUserInPlayfabTask();
+            loginPassword.text = string.Empty;
+
+            IngresarAlJuego();
+        }
+        catch (Exception error)
+        {
+            MostrarErrorUI("Error al iniciar sesión: " + error.Message);
+        }
+    }
+
+    public Task<LoginResult> LoginUserInPlayfabTask()
+    {
+        var taskSource = new TaskCompletionSource<LoginResult>();
+
+        LoginWithEmailAddressRequest request = new LoginWithEmailAddressRequest()
+        {
+            Email = loginEmail.text.Trim(),
+            Password = loginPassword.text
         };
 
-        PlayFabClientAPI.RegisterPlayFabUser(request, resultCallback => taskSource.SetResult(resultCallback), 
-            errorCallback => taskSource.SetException(new Exception(errorCallback.GenerateErrorReport())));
-        // el resultado que pudiste mandar a un metodo, mejor mandarlo a mi variable
-        // una exception es la viarable predilecta de csharp para guardar o manejar errores 
-        // yo necesito que errorCallBack el cual es una variable tipo PlayFabError lo transforme a Exception
-        // dentro del parentesis de SetException, no puedo poner un PlayFabError, por eso la tengo que convertir
-        // GenerateErrorReport me guarda en un Exception lo que originalmente tiempotiene el PlayFabError
+        PlayFabClientAPI.LoginWithEmailAddress(request,
+            resultCallback => taskSource.SetResult(resultCallback),
+            errorCallback => taskSource.SetException(new Exception(errorCallback.GenerateErrorReport()))
+        );
 
-        return await taskSource.Task; // devuelve ya sea el error 
+        return taskSource.Task;
     }
 
-    IEnumerator Corrutina()
+    private void IngresarAlJuego()
     {
-        yield return new WaitUntil(() => 18 > 25);
+        if (panelAutenticacion != null) panelAutenticacion.SetActive(false);
+        if (panelMenuJuego != null) panelMenuJuego.SetActive(true);
+
+        DownloadDataFromPlayfab();
     }
 
+    public async void UploadDataInPlayfab()
+    {
+        try
+        {
+            await UploadDataInPlayfabTask();
+        }
+        catch (Exception error)
+        {
+            Debug.LogError($"Error al subir datos vía CloudScript: {error.Message}");
+        }
+    }
 
+    public Task<ExecuteCloudScriptResult> UploadDataInPlayfabTask()
+    {
+        var taskSource = new TaskCompletionSource<ExecuteCloudScriptResult>();
 
+        var dataObject = new Dictionary<string, string>()
+        {
+            { "kill count", StatManager.Instance != null ? StatManager.Instance.killCount.ToString() : "0" },
+            { "deaths count", StatManager.Instance != null ? StatManager.Instance.deathsCount.ToString() : "0" },
+            { "player color", StatManager.playerColor ?? "#FFFFFF" }
+        };
 
+        ExecuteCloudScriptRequest request = new ExecuteCloudScriptRequest()
+        {
+            FunctionName = "savePlayerData",
+            FunctionParameter = new { playerData = dataObject },
+            GeneratePlayStreamEvent = true
+        };
+
+        PlayFabClientAPI.ExecuteCloudScript(request,
+            resultCallback => taskSource.SetResult(resultCallback),
+            errorCallback => taskSource.SetException(new Exception(errorCallback.GenerateErrorReport()))
+        );
+
+        return taskSource.Task;
+    }
+
+    public async void DownloadDataFromPlayfab()
+    {
+        try
+        {
+            var result = await DownloadDataFromPlayfabTask();
+
+            if (result.FunctionResult != null)
+            {
+                string jsonResult = PlayFab.PluginManager.GetPlugin<ISerializerPlugin>(PluginContract.PlayFab_Serializer).SerializeObject(result.FunctionResult);
+                var responseData = PlayFab.PluginManager.GetPlugin<ISerializerPlugin>(PluginContract.PlayFab_Serializer).DeserializeObject<Dictionary<string, string>>(jsonResult);
+
+                Dictionary<string, string> downloadedStats = new Dictionary<string, string>
+                {
+                    ["kill count"] = responseData.ContainsKey("kill count") ? responseData["kill count"] : "0",
+                    ["deaths count"] = responseData.ContainsKey("deaths count") ? responseData["deaths count"] : "0",
+                    ["player color"] = responseData.ContainsKey("player color") ? responseData["player color"] : null
+                };
+
+                if (StatManager.Instance != null)
+                {
+                    if (int.TryParse(downloadedStats["kill count"], out int kills))
+                        StatManager.Instance.killCount = kills;
+
+                    if (int.TryParse(downloadedStats["deaths count"], out int deaths))
+                        StatManager.Instance.deathsCount = deaths;
+                }
+
+                string colorRemoto = responseData.ContainsKey("player color") ? responseData["player color"] : null;
+                if (!string.IsNullOrEmpty(colorRemoto) && colorRemoto != "#FFFFFF")
+                {
+                    StatManager.playerColor = colorRemoto;
+                }
+                else if (string.IsNullOrEmpty(StatManager.playerColor))
+                {
+                    StatManager.playerColor = "#FFFFFF"; // Fallback únicamente si localmente también está vacío
+                }
+
+                Debug.Log($"Color de jugador sincronizado: {StatManager.playerColor}");
+            }
+        }
+        catch (Exception error)
+        {
+            Debug.LogError($"Error al obtener datos por CloudScript: {error.Message}");
+        }
+    }
+
+    public Task<ExecuteCloudScriptResult> DownloadDataFromPlayfabTask()
+    {
+        var taskSource = new TaskCompletionSource<ExecuteCloudScriptResult>();
+
+        ExecuteCloudScriptRequest request = new ExecuteCloudScriptRequest()
+        {
+            FunctionName = "getPlayerData",
+            FunctionParameter = null,
+            GeneratePlayStreamEvent = true
+        };
+
+        PlayFabClientAPI.ExecuteCloudScript(request,
+            resultCallback => taskSource.SetResult(resultCallback),
+            errorCallback => taskSource.SetException(new Exception(errorCallback.GenerateErrorReport()))
+        );
+
+        return taskSource.Task;
+    }
+
+    public void MostrarErrorUI(string mensaje)
+    {
+        if (panelError != null)
+        {
+            if (errorText != null)
+            {
+                errorText.text = mensaje;
+                errorText.gameObject.SetActive(true);
+            }
+
+            panelError.SetActive(true);
+
+            if (errorCoroutine != null) StopCoroutine(errorCoroutine);
+            errorCoroutine = StartCoroutine(OcultarErrorDespuesDeTiempo(5f));
+        }
+        else
+        {
+            Debug.LogError(mensaje);
+        }
+    }
+
+    private IEnumerator OcultarErrorDespuesDeTiempo(float segundos)
+    {
+        yield return new WaitForSeconds(segundos);
+
+        if (errorText != null)
+        {
+            errorText.text = string.Empty;
+            errorText.gameObject.SetActive(false);
+        }
+
+        if (panelError != null)
+        {
+            panelError.SetActive(false);
+        }
+    }
 }

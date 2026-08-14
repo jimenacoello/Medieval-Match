@@ -1,101 +1,70 @@
 ﻿using Fusion;
 using Fusion.Addons.SimpleKCC;
-using System;
 using UnityEngine;
-using UnityEngine.InputSystem;
-using UnityEngine.Serialization;
-
 
 public class CameraController : NetworkBehaviour
 {
-    private InputInfo input;
-    private SimpleKCC _simpleKCC;
-
-    [Header("Camera Settings")] 
+    [Header("Camera Settings")]
     [SerializeField] private Transform player;
 
+    [Header("Head Bobbing")]
+    [SerializeField, Range(0, 0.1f)] private float walkingAmplitude = 0.015f;
+    [SerializeField, Range(0, 0.1f)] private float runningAmplitude = 0.03f;
+    [SerializeField, Range(0, 15)] private float walkingFrequency = 10.0f;
+    [SerializeField, Range(10, 20)] private float runningFrequency = 18f;
+    [SerializeField] private float resetPosSpeed = 5.0f;
 
-    [Header("Blob Movement")]
-    [SerializeField] private bool moveHead;
-    [SerializeField] private float walkingSpeed = 1f;
-    [SerializeField, Range(0,0.1f)] private float walkingAmplitude = 0.015f;
-    [SerializeField, Range(0,0.1f)] private float runningAmplitude = 0.015f; 
-    [SerializeField, Range(0,15)] private float walkingFrequency = 10.0f; 
-    [SerializeField, Range(10,20)] private float runningFrequency = 18f; 
-    [SerializeField] private float resetPosSpeed = 3.0f; 
-
-    private Vector3 startPos; 
-    private Vector2 head;
-    private InputManager inputManager;
-    
-
+    private Vector3 startPos;
 
     private void Awake()
     {
         startPos = transform.localPosition;
     }
 
-
     public override void Spawned()
     {
-        if (_simpleKCC == null)
-        {
-            _simpleKCC = GetComponentInParent<SimpleKCC>();
-        }
-
         if (!HasInputAuthority)
         {
-            GetComponent<Camera>().enabled = false;
-            GetComponent<AudioListener>().enabled = false;
-        }
-    }
+            Camera cam = GetComponent<Camera>();
+            if (cam != null) cam.enabled = false;
 
-    public override void FixedUpdateNetwork()
-    {
+            AudioListener listener = GetComponent<AudioListener>();
+            if (listener != null) listener.enabled = false;
+        }
     }
 
     public override void Render()
     {
         if (!HasInputAuthority) return;
 
-        if (input.isMovingInputPressed)
+        if (GetInput(out MovementController.GameplayInput input))
         {
-            float freq = input.wasRunInputPressed ? runningFrequency : walkingFrequency;
-            float amp = input.wasRunInputPressed ? runningAmplitude : walkingAmplitude;
+            bool isMoving = input.MoveDirection.sqrMagnitude > 0.1f;
 
-            Vector3 bobPos = Vector3.zero;
-            bobPos.y = Mathf.Sin(Runner.SimulationTime * freq) * amp;
-            bobPos.x = Mathf.Cos(Runner.SimulationTime * freq / 0.5f) * amp;
+            if (isMoving)
+            {
+                float freq = input.IsRunning ? runningFrequency : walkingFrequency;
+                float amp = input.IsRunning ? runningAmplitude : walkingAmplitude;
 
-            transform.localPosition = startPos + bobPos;
+                Vector3 bobPos = Vector3.zero;
+                bobPos.y = Mathf.Sin(Runner.SimulationTime * freq) * amp;
+                bobPos.x = Mathf.Cos(Runner.SimulationTime * freq * 0.5f) * amp;
+
+                transform.localPosition = startPos + bobPos;
+            }
+            else
+            {
+                ResetPosition();
+            }
         }
         else
         {
-            transform.localPosition = Vector3.Lerp(transform.localPosition, startPos, resetPosSpeed * Runner.DeltaTime);
+            ResetPosition();
         }
     }
-
 
     private void ResetPosition()
     {
         transform.localPosition = Vector3.Lerp(transform.localPosition, startPos, resetPosSpeed * Runner.DeltaTime);
     }
-
-    private Vector3 FootStepMotion()
-    {
-        Vector3 pos = Vector3.zero;
-        pos.y = Mathf.Sin(Time.time * walkingFrequency) * walkingAmplitude * walkingSpeed;
-        pos.x = Mathf.Cos(Time.time * walkingFrequency / 2) * walkingAmplitude * 2 * walkingSpeed;
-        return pos;
-    }
-    
-    
-    private Vector3 RunningFootStepMotion()
-    {
-        Vector3 pos = Vector3.zero;
-        pos.y = Mathf.Sin(Time.time * runningFrequency) * runningAmplitude * walkingSpeed;
-        pos.x = Mathf.Cos(Time.time * runningFrequency / 2) * runningAmplitude * 2 * walkingSpeed;
-        return pos;
-    }
-    
 }

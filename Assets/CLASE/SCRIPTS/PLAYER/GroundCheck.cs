@@ -1,31 +1,24 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class GroundCheck : MonoBehaviour
 {
-    [SerializeField] private float distance;
+    [SerializeField] private float distance = 0.3f;
     [SerializeField] private Transform origin;
     [SerializeField] private LayerMask groundLayers;
-    
+
     public bool isGrounded;
-    
-    private void OnDrawGizmos()
+
+    private Vector3 OriginPosition => origin != null ? origin.position : transform.position;
+
+    private void OnDrawGizmosSelected()
     {
         Gizmos.color = Color.red;
-        Gizmos.DrawRay(CheckRay().origin,CheckRay().direction * distance);
+        Gizmos.DrawRay(OriginPosition, Vector3.down * distance);
     }
 
     public bool IsGrounded()
     {
-        
-        isGrounded = Physics.Raycast(CheckRay(), distance, groundLayers);
-        
+        isGrounded = Physics.Raycast(OriginPosition, Vector3.down, distance, groundLayers);
         return isGrounded;
-    }
-
-    public Ray CheckRay()
-    {
-        return new Ray(origin.position,Vector3.down);
     }
 }
